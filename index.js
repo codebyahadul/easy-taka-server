@@ -1,9 +1,9 @@
 const express = require('express');
 require('dotenv').config()
+const cors = require('cors')
 const bodyParser = require('body-parser')
 const bcrypt = require('bcrypt')
 const app = express()
-const cors = require('cors')
 const port = process.env.PORT || 5000;
 
 // middle were
@@ -12,12 +12,12 @@ const corsOptions = {
   credentials: true,
   optionSuccessStatus: 200,
 }
+app.use(bodyParser.json());
 app.use(cors(corsOptions))
 app.use(express.json())
-app.use(bodyParser.json());
 
 
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.ifklbg0.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -77,6 +77,21 @@ async function run() {
       res.send(result)
     })
 
+    // confirm user
+    app.patch('/user/update/:mobile', async(req, res) => {
+      const mobile = req.params.mobile;
+      const user = req.body;
+      const query = {mobile: mobile};
+      const updateDoc = {
+        $set: {
+          ...user, 
+        }
+      };
+      const result = await usersCollection.updateOne(query, updateDoc);
+      res.send(result)
+    })
+
+    // 
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
