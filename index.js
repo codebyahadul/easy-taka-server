@@ -1,6 +1,7 @@
 const express = require('express');
 require('dotenv').config()
 const cors = require('cors')
+const { v4: uuidv4 } = require('uuid');
 const bodyParser = require('body-parser')
 const bcrypt = require('bcrypt')
 const app = express()
@@ -32,10 +33,10 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     const usersCollection = client.db('easyTakaDB').collection('users')
+    const sendMoneyCollection = client.db('easyTakaDB').collection('sendMoney')
 
     app.post('/login', async (req, res) => {
       const { mobileOrEmail, password } = req.body;
-      // console.log(mobileOrEmail, password);
       const query = { mobile: mobileOrEmail }
       const user = await usersCollection.findOne(query)
 
@@ -76,28 +77,84 @@ async function run() {
       })
       res.send(result)
     })
+    // get user balance 
+    app.get('/user/balance/:emailOrMobile', async (req, res) => {
+      const emailOrMobile = req.params.emailOrMobile;
+      const result = await usersCollection.findOne({
+        $or: [{ email: emailOrMobile }, { mobile: emailOrMobile }]
+      })
+      res.send(result)
+    })
 
     // confirm user
-    app.patch('/user/update/:mobile', async(req, res) => {
+    app.patch('/user/update/:mobile', async (req, res) => {
       const mobile = req.params.mobile;
       const user = req.body;
-      const query = {mobile: mobile};
+      const query = { mobile: mobile };
       const updateDoc = {
         $set: {
-          ...user, 
+          ...user,
         }
       };
       const result = await usersCollection.updateOne(query, updateDoc);
       res.send(result)
     })
+    app.post('/sendMoney', async (req, res) => {
+      try {
+        const sendMoney = req.body;
+        const { mobile, recipient, password, amount, cutMoney } = sendMoney;
 
-    // 
+        // Fetch recipient and sender details from the database
+        const recipientUser = await usersCollection.findOne({ mobile: recipient });
+        const senderUser = await usersCollection.findOne({ mobile: mobile });
+        // Check if the recipient exists
+        if (!recipientUser) {
+          return res.status(404).send({ message: 'Recipient not found' });
+        }
+
+        // Verify the sender's password
+        const isMatch = await bcrypt.compare(password, senderUser.password);
+        if (!isMatch) {
+          return res.status(401).send({ message: 'Incorrect password' });
+        }
+        // Generate a unique transaction ID
+        const transactionId = uuidv4();
+
+        // Perform the transaction
+        const result = await sendMoneyCollection.insertOne({
+          mobile: mobile,
+          transactionId: transactionId,
+          amount: amount,
+          recipient: recipient
+        });
+
+        // Update the recipient's balance
+        await usersCollection.updateOne(
+          { mobile: recipient },
+          { $inc: { balance: amount } }
+        );
+
+        // Update the sender's balance
+        await usersCollection.updateOne(
+          { mobile: mobile },
+          { $inc: { balance: -cutMoney } }
+        );
+
+        return res.send({ ...result, transactionId });
+      } catch (error) {
+        console.log(error);
+        return res.status(500).send({ message: 'Internal Server Error' });
+      }
+    });
+
+
+
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
-    // Ensures that the client will close when you finish/error
+
     // await client.close();
   }
 }
