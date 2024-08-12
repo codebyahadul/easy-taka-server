@@ -2,23 +2,24 @@ const express = require('express');
 require('dotenv').config()
 const cors = require('cors')
 const { v4: uuidv4 } = require('uuid');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const bodyParser = require('body-parser')
 const bcrypt = require('bcrypt')
 const app = express()
+const jwt = require('jsonwebtoken')
 const port = process.env.PORT || 5000;
 
 // middle were
 const corsOptions = {
-  origin: ['http://localhost:5173',],
+  origin: ['http://localhost:5173'],
   credentials: true,
   optionSuccessStatus: 200,
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }
 app.use(bodyParser.json());
 app.use(cors(corsOptions))
 app.use(express.json())
 
-
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.ifklbg0.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -29,12 +30,30 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   }
 });
-
+// custom middle were
+const verifyToken = (req, res, next) => {
+  if (!req.headers || !req.headers.authorization) {
+    return res.status(401).send({ message: "Unauthorized access" });
+  }
+  const token = req.headers.authorization.split(' ')[1];
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRETS, (err, decoded) => {
+    if (err) {
+      return res.status(403).send({ message: 'Forbidden access' })
+    }
+    req.user = decoded;
+    next()
+  })
+}
 async function run() {
   try {
     const usersCollection = client.db('easyTakaDB').collection('users')
     const sendMoneyCollection = client.db('easyTakaDB').collection('sendMoney')
-
+    // jwt api
+    app.post('/jwt', async (req, res) => {
+      const user = req.body;
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRETS, { expiresIn: '2h' })
+      res.send({ token })
+    })
     app.post('/login', async (req, res) => {
       const { mobileOrEmail, password } = req.body;
       const query = { mobile: mobileOrEmail }
@@ -60,12 +79,13 @@ async function run() {
         email: userInfo.email,
         password,
         role: userInfo.role,
-        status: userInfo.status
+        status: userInfo.status,
+        balance: userInfo.balance
       })
       res.send(result)
     })
 
-    app.get('/users', async (req, res) => {
+    app.get('/users', verifyToken, async (req, res) => {
       const result = await usersCollection.find().toArray()
       res.send(result)
     })
@@ -146,9 +166,6 @@ async function run() {
         return res.status(500).send({ message: 'Internal Server Error' });
       }
     });
-
-
-
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
